@@ -69,24 +69,17 @@ jobs:
           name: application-sbom
           path: reports/
 
-  sast:
+    sast:
     name: Saltinio kodo analize
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Idiegti Bandit
-        run: python -m pip install bandit
-
-      - name: Visu radiniu ataskaita
-        run: bandit -r . --exit-zero
-
-      - name: Sustabdyti del High radiniu
-        run: bandit -r . -lll
+      - name: SAST ataskaita ir High kokybes vartai
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work \
+            python:3.13-slim sh -c \
+            "pip install -q bandit==1.9.4 && python -m py_compile app.py demo_bad.py && bandit -r . --exit-zero && bandit -r . -lll"
 
   container:
     name: Konteinerio skenavimas

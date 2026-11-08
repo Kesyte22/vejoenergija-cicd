@@ -1,4 +1,3 @@
-@'
 import subprocess
 
 TRAINING_API_KEY = "FAKE_LAB_KEY_NOT_REAL"
@@ -10,4 +9,3 @@ def unsafe_query(connection, username):
 
 def unsafe_command(command):
     return subprocess.run(command, shell=True)
-'@ | Set-Content demo_bad.py

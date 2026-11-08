@@ -1,14 +1,12 @@
-FROM python:3.13.7-slim-bookworm AS builder
+FROM python:3.13.18-alpine3.24 AS builder
 
 WORKDIR /build
-
 COPY requirements.hardened.txt .
 
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir -r requirements.hardened.txt
 
-
-FROM python:3.13.7-slim-bookworm AS runtime
+FROM python:3.13.18-alpine3.24 AS runtime
 
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -16,8 +14,8 @@ ENV PATH="/opt/venv/bin:$PATH" \
 
 WORKDIR /app
 
-RUN groupadd --gid 10001 appuser \
-    && useradd --uid 10001 --gid appuser --no-create-home appuser
+RUN addgroup -g 10001 appuser \
+    && adduser -D -H -u 10001 -G appuser appuser
 
 COPY --from=builder /opt/venv /opt/venv
 COPY app.py .
@@ -29,4 +27,4 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/', timeout=3).close()"]
 
-CMD ["python", "app.py"]
+CMD ["gunicorn", "--bind=0.0.0.0:5000", "--worker-tmp-dir=/tmp", "app:app"]

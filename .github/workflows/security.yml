@@ -1,0 +1,139 @@
+name: Security pipeline
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: Slaptu duomenu paieska
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patikrinti mokomuosius API raktus
+        shell: bash
+        run: |
+          if git grep -n -I -E \
+            'AKIA[A-Z0-9]{15,16}|TRAINING_API_KEY[[:space:]]*=' \
+            -- '*.py' '*.txt' '*.json'; then
+            echo "::error::Kode aptiktas galimas API raktas"
+            exit 1
+          fi
+
+  sca:
+    name: Priklausomybes ir SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Idiegti aplikacijos priklausomybes
+        run: |
+          mkdir -p reports
+          python -m venv /tmp/app-venv
+          /tmp/app-venv/bin/pip install -r requirements.hardened.txt
+          /tmp/app-venv/bin/pip freeze > reports/requirements.txt
+
+      - name: Sukurti SBOM
+        run: |
+          python -m pip install cyclonedx-bom
+          cyclonedx-py environment /tmp/app-venv/bin/python \
+            --output-format JSON \
+            --output-file reports/sbom.json
+
+      - name: SCA ataskaita
+        run: |
+          docker run --rm -v "$PWD:/work" \
+            aquasec/trivy:0.76.1 fs \
+            --scanners vuln --exit-code 0 \
+            /work/reports
+
+      - name: Critical kokybes vartai
+        run: |
+          docker run --rm -v "$PWD:/work" \
+            aquasec/trivy:0.76.1 fs \
+            --scanners vuln --severity CRITICAL --exit-code 1 \
+            /work/reports
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: application-sbom
+          path: reports/
+
+  sast:
+    name: Saltinio kodo analize
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Idiegti Bandit
+        run: python -m pip install bandit
+
+      - name: Visu radiniu ataskaita
+        run: bandit -r . --exit-zero
+
+      - name: Sustabdyti del High radiniu
+        run: bandit -r . -lll
+
+  container:
+    name: Konteinerio skenavimas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sukurti image skenavimui
+        run: docker build -f Dockerfile.hardened -t vejoenergija:scan .
+
+      - name: Image CVE ataskaita
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.76.1 image \
+            --scanners vuln --exit-code 0 vejoenergija:scan
+
+      - name: Critical kokybes vartai
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.76.1 image \
+            --scanners vuln --severity CRITICAL --exit-code 1 \
+            vejoenergija:scan
+
+  iac:
+    name: Dockerfile analize
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkov rekomendacijos
+        run: |
+          docker run --rm -v "$PWD:/work" \
+            bridgecrew/checkov:3.4.3 \
+            -f /work/Dockerfile.hardened \
+            --framework dockerfile --compact --soft-fail
+
+  build:
+    name: Build ir imituotas deploy
+    needs: [secrets, sca, sast, container, iac]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Galutinis build
+        run: docker build -f Dockerfile.hardened -t vejoenergija:approved .
+
+      - name: Imituotas deploy
+        run: echo "Patikros praejo. Image paruostas diegimui."

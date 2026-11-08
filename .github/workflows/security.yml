@@ -69,7 +69,7 @@ jobs:
           name: application-sbom
           path: reports/
 
-    sast:
+  sast:
     name: Saltinio kodo analize
     runs-on: ubuntu-latest
     steps:
